@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../auth/presentation/screens/register_screen.dart';
+import '../provider/onboarding_providers.dart';
 
-class ModeSelectionScreen extends StatefulWidget {
+class ModeSelectionScreen extends ConsumerStatefulWidget {
   const ModeSelectionScreen({super.key});
 
   static const routePath = '/mode-selection';
 
   @override
-  State<ModeSelectionScreen> createState() => _ModeSelectionScreenState();
+  ConsumerState<ModeSelectionScreen> createState() => _ModeSelectionScreenState();
 }
 
-class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
+class _ModeSelectionScreenState extends ConsumerState<ModeSelectionScreen> {
   int? _selectedIndex;
 
   void _selectMode(int index) {
@@ -110,8 +112,7 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                 /// Continue as Guest
                 GestureDetector(
                   onTap: () {
-                    // Home route not defined in the app yet; using a placeholder.
-                    // Update this to your real home route when added.
+                    ref.read(onboardingFlowProvider.notifier).markDone();
                     context.go('/home');
                   },
                   child: const Text(

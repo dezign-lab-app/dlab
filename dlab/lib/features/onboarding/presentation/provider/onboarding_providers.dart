@@ -15,6 +15,9 @@ enum OnboardingFlowState {
 
   /// Move user to onboarding.
   onboarding,
+
+  /// Onboarding finished (or skipped) and app can proceed normally.
+  done,
 }
 
 class OnboardingFlowNotifier extends StateNotifier<OnboardingFlowState> {
@@ -29,6 +32,12 @@ class OnboardingFlowNotifier extends StateNotifier<OnboardingFlowState> {
     _timer = Timer(const Duration(seconds: 3), () {
       if (mounted) state = OnboardingFlowState.onboarding;
     });
+  }
+
+  /// Call when the user finishes onboarding or chooses to skip/continue.
+  void markDone() {
+    _timer?.cancel();
+    state = OnboardingFlowState.done;
   }
 
   @override

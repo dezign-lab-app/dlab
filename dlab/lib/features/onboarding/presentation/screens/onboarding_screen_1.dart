@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'mode_selection_screen.dart';
+
 class OnboardingScreen1 extends StatelessWidget {
   const OnboardingScreen1({super.key});
 
@@ -57,7 +59,9 @@ class OnboardingScreen1 extends StatelessWidget {
               top: height * 0.03,
               right: width * 0.05,
               child: GestureDetector(
-                onTap: () {},
+                onTap: () {
+                  context.go(ModeSelectionScreen.routePath);
+                },
                 child: Text(
                   'Skip',
                   style: TextStyle(

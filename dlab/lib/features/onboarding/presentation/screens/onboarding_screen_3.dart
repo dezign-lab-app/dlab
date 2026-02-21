@@ -39,8 +39,7 @@ class OnboardingScreen3 extends StatelessWidget {
               right: width * 0.05,
               child: GestureDetector(
                 onTap: () {
-                  // TODO: Replace with real home route when implemented.
-                  context.go('/onboarding-1');
+                  context.go(ModeSelectionScreen.routePath);
                 },
                 child: Text(
                   'Skip',

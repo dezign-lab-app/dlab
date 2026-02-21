@@ -6,6 +6,7 @@ import 'features/auth/presentation/provider/auth_providers.dart';
 import 'features/auth/presentation/screens/login_screen.dart';
 import 'features/auth/presentation/screens/register_screen.dart';
 import 'features/auth/presentation/screens/splash_screen.dart';
+import 'features/home/presentation/screens/dlabs_home_page.dart';
 import 'features/onboarding/presentation/provider/onboarding_providers.dart';
 import 'features/onboarding/presentation/screens/dlab_splash_screen.dart';
 import 'features/onboarding/presentation/screens/mode_selection_screen.dart';
@@ -50,19 +51,26 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: ModeSelectionScreen.routePath,
         builder: (_, __) => const ModeSelectionScreen(),
       ),
+      GoRoute(
+        path: DLabsHomePage.routePath,
+        builder: (_, __) => const DLabsHomePage(),
+      ),
     ],
     redirect: (context, state) {
       final flow = ref.read(onboardingFlowProvider);
 
-      final isStaticSplash = state.matchedLocation == DLabSplashScreen.routePath;
-      final isOnboarding = state.matchedLocation == OnboardingScreen1.routePath ||
-          state.matchedLocation == OnboardingScreen2.routePath ||
-          state.matchedLocation == OnboardingScreen3.routePath;
+      final location = state.matchedLocation;
 
-      final isAuth = state.matchedLocation == LoginScreen.routePath ||
-          state.matchedLocation == RegisterScreen.routePath;
+      final isStaticSplash = location == DLabSplashScreen.routePath;
+      final isOnboarding = location == OnboardingScreen1.routePath ||
+          location == OnboardingScreen2.routePath ||
+          location == OnboardingScreen3.routePath;
 
-      final isModeSelection = state.matchedLocation == ModeSelectionScreen.routePath;
+      final isAuth = location == LoginScreen.routePath ||
+          location == RegisterScreen.routePath;
+
+      final isModeSelection = location == ModeSelectionScreen.routePath;
+      final isHome = location == DLabsHomePage.routePath;
 
       // Phase 1: show static splash for a few seconds.
       if (flow == OnboardingFlowState.splash) {
@@ -70,11 +78,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       }
 
       // Phase 2: after splash delay, default user to onboarding.
-      // IMPORTANT: Don't redirect away from auth or mode selection screens.
-      if (!isOnboarding && !isAuth && !isModeSelection) {
-        return OnboardingScreen1.routePath;
+      // IMPORTANT: Don't redirect away from auth/mode selection/home screens.
+      if (flow == OnboardingFlowState.onboarding) {
+        if (!isOnboarding && !isAuth && !isModeSelection && !isHome) {
+          return OnboardingScreen1.routePath;
+        }
       }
 
+      // Flow done => no forced redirect.
       return null;
     },
   );
