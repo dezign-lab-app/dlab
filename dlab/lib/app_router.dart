@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'features/auth/presentation/provider/auth_providers.dart';
+import 'features/auth/presentation/screens/forgot_password_screen.dart';
 import 'features/auth/presentation/screens/login_screen.dart';
 import 'features/auth/presentation/screens/register_screen.dart';
+import 'features/auth/presentation/screens/signup_screen.dart';
 import 'features/auth/presentation/screens/splash_screen.dart';
 import 'features/home/presentation/screens/dlabs_home_page.dart';
 import 'features/onboarding/presentation/provider/onboarding_providers.dart';
@@ -26,6 +28,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: LoginScreen.routePath,
         builder: (_, __) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: SignUpScreen.routePath,
+        builder: (_, __) => const SignUpScreen(),
+      ),
+      GoRoute(
+        path: ForgotPasswordScreen.routePath,
+        builder: (_, __) => const ForgotPasswordScreen(),
       ),
       GoRoute(
         path: RegisterScreen.routePath,
@@ -58,6 +68,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
     ],
     redirect: (context, state) {
       final flow = ref.read(onboardingFlowProvider);
+      final authState = ref.read(authStateProvider);
 
       final location = state.matchedLocation;
 
@@ -67,10 +78,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           location == OnboardingScreen3.routePath;
 
       final isAuth = location == LoginScreen.routePath ||
-          location == RegisterScreen.routePath;
+          location == RegisterScreen.routePath ||
+          location == SignUpScreen.routePath ||
+          location == ForgotPasswordScreen.routePath;
 
-      final isModeSelection = location == ModeSelectionScreen.routePath;
       final isHome = location == DLabsHomePage.routePath;
+
+      // Check if the user is authenticated.
+      final isAuthenticated = authState.valueOrNull is Authenticated;
+
+      // If authenticated, always go to home (unless already there).
+      if (isAuthenticated && !isHome) {
+        return DLabsHomePage.routePath;
+      }
 
       // Phase 1: show static splash for a few seconds.
       if (flow == OnboardingFlowState.splash) {
@@ -78,9 +98,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       }
 
       // Phase 2: after splash delay, default user to onboarding.
-      // IMPORTANT: Don't redirect away from auth/mode selection/home screens.
+      // IMPORTANT: Don't redirect away from auth/home screens.
       if (flow == OnboardingFlowState.onboarding) {
-        if (!isOnboarding && !isAuth && !isModeSelection && !isHome) {
+        if (!isOnboarding && !isAuth && !isHome) {
           return OnboardingScreen1.routePath;
         }
       }

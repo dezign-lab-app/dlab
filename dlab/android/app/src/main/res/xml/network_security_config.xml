@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Allows plain HTTP to app.dezign-lab.com while SSL is not yet configured.
+  REMOVE this file (and the reference in AndroidManifest.xml) once HTTPS is live.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">app.dezign-lab.com</domain>
+    </domain-config>
+</network-security-config>

@@ -7,7 +7,7 @@ class ProdEnv extends Env {
   String get name => 'prod';
 
   @override
-  String get baseUrl => 'https://app.dezign-lab.com/api';
+  String get baseUrl => 'http://app.dezign-lab.com:3000/api'; // TODO: switch to https:// after SSL + Nginx are configured
 
   @override
   bool get enableNetworkLogs => false;

@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "417942155162",
+    "project_id": "dlabs-1dd1d",
+    "storage_bucket": "dlabs-1dd1d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:417942155162:android:f027c96cbfd4a036f6d423",
+        "android_client_info": {
+          "package_name": "com.dezignlab.dlab"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "417942155162-7m867eg0e6im2mmogt1qg2nt6sdr0a8u.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.dezignlab.dlab",
+            "certificate_hash": "66955f56bcb433fba7ad75420d26c2a28fba5247"
+          }
+        },
+        {
+          "client_id": "417942155162-p74q509t3h16lb7pac426d5mrrvp20mr.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBzsZ_E7SJBY-rD4dPGp8q1_w-WbrpIYSg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "417942155162-p74q509t3h16lb7pac426d5mrrvp20mr.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "417942155162-gfa2hlbqohgae315blr9970lobeg47dh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.dezignlab.dlab"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

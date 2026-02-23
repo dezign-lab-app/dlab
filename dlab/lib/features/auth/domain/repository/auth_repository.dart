@@ -1,22 +1,14 @@
 import 'package:dartz/dartz.dart';
 
 import '../../../../core/error/failure.dart';
-import '../entities/auth_tokens.dart';
 import '../entities/user.dart';
 
 abstract class AuthRepository {
-  Future<Either<Failure, AuthTokens>> login({required String email, required String password});
-
-  Future<Either<Failure, AuthTokens>> register({
-    required String email,
-    required String password,
-    required String name,
-    String? phone,
-  });
-
-  Future<Either<Failure, AuthTokens>> refreshToken({required String refreshToken});
-
-  Future<Either<Failure, Unit>> logout();
-
+  /// Fetches user data from PostgreSQL via GET /api/me.
+  /// The Firebase token is injected automatically by the Dio interceptor.
   Future<Either<Failure, User>> me();
+
+  /// Upserts the user in PostgreSQL via POST /api/auth/sync-user.
+  /// Used on first-time registration and Google sign-in.
+  Future<Either<Failure, User>> syncUser({String? fullName, String? phone, String? provider});
 }

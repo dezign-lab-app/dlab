@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import 'mode_selection_screen.dart';
+import '../../../auth/presentation/screens/register_screen.dart';
 
 class OnboardingScreen3 extends StatelessWidget {
   const OnboardingScreen3({super.key});
@@ -39,7 +39,7 @@ class OnboardingScreen3 extends StatelessWidget {
               right: width * 0.05,
               child: GestureDetector(
                 onTap: () {
-                  context.go(ModeSelectionScreen.routePath);
+                  context.go(RegisterScreen.routePath);
                 },
                 child: Text(
                   'Skip',
@@ -129,7 +129,7 @@ class OnboardingScreen3 extends StatelessWidget {
                     elevation: 0,
                   ),
                   onPressed: () {
-                    context.go(ModeSelectionScreen.routePath);
+                    context.go(RegisterScreen.routePath);
                   },
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,

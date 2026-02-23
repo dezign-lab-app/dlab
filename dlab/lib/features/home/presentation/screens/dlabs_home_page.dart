@@ -358,7 +358,7 @@ class _CategoriesSection extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: Color(0xff1B4965).withOpacity(0.28),
+                          color: Color(0xff1B4965).withValues(alpha: 0.28),
                         ),
                       ),
                       child: const Icon(

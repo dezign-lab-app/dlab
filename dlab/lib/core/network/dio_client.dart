@@ -4,15 +4,11 @@ import 'package:logger/logger.dart';
 import '../constants/app_constants.dart';
 import '../env/env.dart';
 import 'dio_interceptors.dart';
-import 'token_storage.dart';
 
 class DioClient {
   DioClient({
     required Env env,
-    required TokenStorage tokenStorage,
     required Logger logger,
-    required Future<TokenPair> Function(String refreshToken) onRefreshToken,
-    required void Function() onUnauthorized,
   }) : dio = Dio(
           BaseOptions(
             baseUrl: env.baseUrl,
@@ -26,13 +22,10 @@ class DioClient {
           ),
         ) {
     dio.interceptors.addAll(
-      buildInterceptors(
+      buildFirebaseInterceptors(
         dio: dio,
-        tokenStorage: tokenStorage,
         logger: logger,
         enableLogs: env.enableNetworkLogs,
-        onRefreshToken: onRefreshToken,
-        onUnauthorized: onUnauthorized,
       ),
     );
   }
