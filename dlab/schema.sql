@@ -1,6 +1,6 @@
 -- ============================================================
 -- DLabs PostgreSQL Schema
--- Auth: Firebase (email/password + Google)
+-- Auth: Supabase (email/password + Google)
 -- Admin: Super Admin Panel (Next.js)
 -- ============================================================
 
@@ -26,12 +26,12 @@ CREATE TYPE banner_position_enum    AS ENUM ('homepage_hero', 'homepage_promo', 
 CREATE TYPE page_slug_enum          AS ENUM ('about_us', 'privacy_policy', 'terms_and_conditions');
 
 -- ============================================================
--- 1. USERS  (Firebase Auth → PostgreSQL)
+-- 1. USERS  (Supabase Auth → PostgreSQL)
 -- ============================================================
 
 CREATE TABLE users (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    firebase_uid        VARCHAR(128)    UNIQUE NOT NULL,
+    supabase_uid        VARCHAR(128)    UNIQUE NOT NULL,
     email               VARCHAR(255)    UNIQUE NOT NULL,
     name                VARCHAR(255),
     phone               VARCHAR(20),
@@ -51,7 +51,7 @@ CREATE TABLE users (
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_users_firebase_uid  ON users(firebase_uid);
+CREATE INDEX idx_users_supabase_uid  ON users(supabase_uid);
 CREATE INDEX idx_users_email         ON users(email);
 CREATE INDEX idx_users_phone         ON users(phone);
 CREATE INDEX idx_users_is_blocked    ON users(is_blocked);

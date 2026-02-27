@@ -8,7 +8,16 @@ import 'features/auth/presentation/provider/auth_providers.dart';
 
 Future<void> main() async {
   final container = ProviderContainer();
-  await bootstrap(container);
+
+  try {
+    await bootstrap(container);
+  } catch (e, st) {
+    debugPrint('╔══ BOOTSTRAP ERROR ══');
+    debugPrint('║ $e');
+    debugPrint('║ $st');
+    debugPrint('╚═════════════════════');
+    // Still launch the app so the user sees *something* instead of a black screen.
+  }
 
   runApp(
     UncontrolledProviderScope(

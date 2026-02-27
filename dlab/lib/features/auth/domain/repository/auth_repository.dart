@@ -5,7 +5,7 @@ import '../entities/user.dart';
 
 abstract class AuthRepository {
   /// Fetches user data from PostgreSQL via GET /api/me.
-  /// The Firebase token is injected automatically by the Dio interceptor.
+  /// The Supabase token is injected automatically by the Dio interceptor.
   Future<Either<Failure, User>> me();
 
   /// Upserts the user in PostgreSQL via POST /api/auth/sync-user.

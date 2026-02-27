@@ -6,44 +6,33 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../provider/auth_providers.dart';
-import 'signup_screen.dart';
+import 'forgot_password_screen.dart';
+import 'reset_password_screen.dart';
 
-// ── Data passed from SignUpScreen via GoRouter extra ────────────────────────
+/// Screen that collects the 6-digit OTP sent to the user's email during the
+/// forgot-password flow. On successful verification a Supabase session is
+/// created so that the next screen can call `updateUser` to set the new
+/// password.
+class VerificationScreen extends ConsumerStatefulWidget {
+  const VerificationScreen({super.key});
 
-class SignupData {
-  const SignupData({
-    required this.email,
-    required this.name,
-    required this.password,
-  });
-
-  final String email;
-  final String name;
-  final String password;
-}
-
-// ── Screen ────────────────────────────────────────────────────────────────────
-
-class SignupVerificationScreen extends ConsumerStatefulWidget {
-  const SignupVerificationScreen({super.key});
-
-  static const routePath = '/signup-verify';
+  static const routePath = '/forgot-password-verify';
 
   @override
-  ConsumerState<SignupVerificationScreen> createState() =>
-      _SignupVerificationScreenState();
+  ConsumerState<VerificationScreen> createState() =>
+      _VerificationScreenState();
 }
 
-class _SignupVerificationScreenState
-    extends ConsumerState<SignupVerificationScreen> {
-  // 6 individual controllers + focus nodes for the OTP boxes
+class _VerificationScreenState extends ConsumerState<VerificationScreen> {
+  // 6 individual controllers + focus nodes for the OTP boxes.
   final List<TextEditingController> _controllers =
       List.generate(6, (_) => TextEditingController());
   final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
 
-  SignupData? _signupData;
+  String? _email;
+  bool _isVerifying = false;
 
-  // Resend cooldown
+  // Resend cooldown.
   int _resendCountdown = 60;
   Timer? _timer;
 
@@ -53,8 +42,8 @@ class _SignupVerificationScreenState
     _startResendTimer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final extra = GoRouterState.of(context).extra;
-      if (extra is SignupData) {
-        setState(() => _signupData = extra);
+      if (extra is String && extra.isNotEmpty) {
+        setState(() => _email = extra);
       }
     });
   }
@@ -87,68 +76,64 @@ class _SignupVerificationScreenState
   String get _otp => _controllers.map((c) => c.text).join();
 
   Future<void> _verify() async {
-    final data = _signupData;
-    if (data == null) return;
-
+    if (_email == null || _email!.isEmpty) return;
     if (_otp.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter the 6-digit code')),
       );
       return;
     }
+    if (_isVerifying) return;
 
-    await ref.read(authStateProvider.notifier).verifyOtpAndRegister(
-          email: data.email,
-          name: data.name,
-          password: data.password,
-          otp: _otp,
+    setState(() => _isVerifying = true);
+    try {
+      final error = await ref
+          .read(authStateProvider.notifier)
+          .verifyPasswordResetOtp(email: _email!, otp: _otp);
+
+      if (!mounted) return;
+
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error)),
         );
+        return;
+      }
+
+      // OTP verified – navigate to reset-password screen.
+      context.go(ResetPasswordScreen.routePath, extra: _email);
+    } finally {
+      if (mounted) setState(() => _isVerifying = false);
+    }
   }
 
   Future<void> _resend() async {
-    final data = _signupData;
-    if (data == null) return;
+    if (_email == null || _email!.isEmpty) return;
 
-    final error = await ref.read(authStateProvider.notifier).sendOtp(
-          email: data.email,
-          name: data.name,
-          password: data.password,
-        );
+    final error = await ref
+        .read(authStateProvider.notifier)
+        .sendPasswordResetOtp(_email!);
 
     if (!mounted) return;
 
     if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
     } else {
-      // Clear OTP boxes and restart timer
-    for (final c in _controllers) {
-      c.clear();
-    }
+      for (final c in _controllers) {
+        c.clear();
+      }
       _focusNodes[0].requestFocus();
       _startResendTimer();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('A new code has been sent to your email')),
+        const SnackBar(
+            content: Text('A new code has been sent to your email')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(authStateProvider);
-
-    ref.listen(authStateProvider, (prev, next) {
-      next.whenOrNull(
-        error: (err, _) {
-          if (!mounted) return;
-          final msg = err is Exception ? err.toString() : 'Verification failed';
-          final display = msg.startsWith('Exception: ') ? msg.substring(11) : msg;
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(display)));
-        },
-      );
-    });
-
-    final isLoading = state.isLoading;
     final w = MediaQuery.of(context).size.width;
 
     return Scaffold(
@@ -161,13 +146,12 @@ class _SignupVerificationScreenState
             children: [
               const SizedBox(height: 8),
 
-              // Back button
+              // ── Top bar ──────────────────────────────────────────────────
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   GestureDetector(
-                    onTap: () => context.go(SignUpScreen.routePath,
-                        extra: _signupData?.email),
+                    onTap: () => context.go(ForgotPasswordScreen.routePath),
                     child: const Icon(Icons.arrow_back,
                         color: Color(0xFF1A1A1A), size: 24),
                   ),
@@ -178,6 +162,7 @@ class _SignupVerificationScreenState
 
               const SizedBox(height: 24),
 
+              // ── Title ────────────────────────────────────────────────────
               const Text(
                 'Verify your email',
                 style: TextStyle(
@@ -192,6 +177,7 @@ class _SignupVerificationScreenState
 
               const SizedBox(height: 8),
 
+              // ── Subtitle ─────────────────────────────────────────────────
               RichText(
                 text: TextSpan(
                   style: const TextStyle(
@@ -203,37 +189,42 @@ class _SignupVerificationScreenState
                   ),
                   children: [
                     const TextSpan(
-                        text: "We've sent a 6-digit verification code to "),
+                        text:
+                            "We've sent a 6-digit verification code to "),
                     TextSpan(
-                      text: _signupData?.email ?? '',
+                      text: _email ?? '',
                       style: const TextStyle(
                         color: Color(0xFF1B4965),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     const TextSpan(
-                        text: '. Enter it below to confirm your account.'),
+                        text:
+                            '. Enter it below to reset your password.'),
                   ],
                 ),
               ),
 
               const SizedBox(height: 36),
 
-              // OTP boxes
+              // ── OTP boxes ────────────────────────────────────────────────
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: List.generate(6, (i) => _OtpBox(
-                  controller: _controllers[i],
-                  focusNode: _focusNodes[i],
-                  nextFocus: i < 5 ? _focusNodes[i + 1] : null,
-                  prevFocus: i > 0 ? _focusNodes[i - 1] : null,
-                  onCompleted: i == 5 ? _verify : null,
-                )),
+                children: List.generate(
+                  6,
+                  (i) => _OtpBox(
+                    controller: _controllers[i],
+                    focusNode: _focusNodes[i],
+                    nextFocus: i < 5 ? _focusNodes[i + 1] : null,
+                    prevFocus: i > 0 ? _focusNodes[i - 1] : null,
+                    onCompleted: i == 5 ? _verify : null,
+                  ),
+                ),
               ),
 
               const SizedBox(height: 32),
 
-              // Verify button
+              // ── Verify button ────────────────────────────────────────────
               SizedBox(
                 width: double.infinity,
                 height: 54,
@@ -246,8 +237,8 @@ class _SignupVerificationScreenState
                     ),
                     elevation: 0,
                   ),
-                  onPressed: isLoading ? null : _verify,
-                  child: isLoading
+                  onPressed: _isVerifying ? null : _verify,
+                  child: _isVerifying
                       ? const SizedBox(
                           height: 18,
                           width: 18,
@@ -257,11 +248,11 @@ class _SignupVerificationScreenState
                           ),
                         )
                       : const Text(
-                          'Verify & Create Account',
+                          'Verify',
                           style: TextStyle(
                             fontFamily: 'Inter',
                             fontSize: 16,
-                            fontWeight: FontWeight.w400,
+                            fontWeight: FontWeight.w500,
                             color: Color(0xFFFFFFFF),
                           ),
                         ),
@@ -270,7 +261,7 @@ class _SignupVerificationScreenState
 
               const SizedBox(height: 24),
 
-              // Resend code
+              // ── Resend code ──────────────────────────────────────────────
               Center(
                 child: _resendCountdown > 0
                     ? Text(
@@ -282,7 +273,7 @@ class _SignupVerificationScreenState
                         ),
                       )
                     : GestureDetector(
-                        onTap: isLoading ? null : _resend,
+                        onTap: _isVerifying ? null : _resend,
                         child: const Text(
                           'Resend code',
                           style: TextStyle(

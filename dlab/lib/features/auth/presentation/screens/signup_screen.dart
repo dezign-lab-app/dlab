@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../provider/auth_providers.dart';
 import 'login_screen.dart';
 import 'register_screen.dart';
+import 'signup_verification_screen.dart';
 
 class SignUpScreen extends ConsumerStatefulWidget {
   const SignUpScreen({super.key});
@@ -44,30 +45,37 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    await ref.read(authStateProvider.notifier).register(
-          email: _emailController.text.trim(),
-          password: _passwordController.text,
-          name: _nameController.text.trim(),
-        );
+    final email    = _emailController.text.trim();
+    final name     = _nameController.text.trim();
+    final password = _passwordController.text;
+
+    final error = await ref.read(authStateProvider.notifier).sendOtp(
+      email: email,
+      name: name,
+      password: password,
+    );
+
+    if (!mounted) return;
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error)),
+      );
+      return;
+    }
+
+    // Navigate to OTP verification screen, passing signup data as extra
+    context.go(
+      SignupVerificationScreen.routePath,
+      extra: SignupData(email: email, name: name, password: password),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(authStateProvider);
 
-    ref.listen(authStateProvider, (prev, next) {
-      next.whenOrNull(
-        error: (err, _) {
-          if (!mounted) return;
-          final msg = err is Exception ? err.toString() : 'Registration failed';
-          final display =
-              msg.startsWith('Exception: ') ? msg.substring(11) : msg;
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(display)));
-        },
-      );
-    });
-
+    // No longer listening to provider errors here — sendOtp returns error string directly.
     final isLoading = state.isLoading;
     final w = MediaQuery.of(context).size.width;
 

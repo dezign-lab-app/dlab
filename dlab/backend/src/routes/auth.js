@@ -1,21 +1,21 @@
 import { Router } from 'express';
 import { z } from 'zod';
 
-import { verifyFirebaseToken } from '../middleware/verifyFirebaseToken.js';
-import { upsertUserFromFirebase, getUserByFirebaseUid } from '../services/userSync.js';
+import { verifySupabaseToken } from '../middleware/verifySupabaseToken.js';
+import { upsertUserFromSupabase, getUserBySupabaseUid } from '../services/userSync.js';
 
 export const authRouter = Router();
 
 // POST /api/auth/sync-user
-// Authorization: Bearer <Firebase ID Token>
-// Body: { fullName?, phone?, avatarUrl?, role?, provider? }
-authRouter.post('/sync-user', verifyFirebaseToken, async (req, res, next) => {
+// Authorization: Bearer <Supabase JWT>
+// Body: { fullName?, phone?, avatarUrl?, provider? }
+authRouter.post('/sync-user', verifySupabaseToken, async (req, res, next) => {
   try {
     const bodySchema = z.object({
       fullName:  z.string().min(1).max(150).optional(),
       phone:     z.string().min(1).max(20).optional(),
       avatarUrl: z.string().url().optional(),
-      provider:  z.string().min(1).max(50).optional(),   // 'email' | 'google'
+      provider:  z.string().min(1).max(50).optional(),
     });
 
     const parsed = bodySchema.safeParse(req.body ?? {});
@@ -23,8 +23,8 @@ authRouter.post('/sync-user', verifyFirebaseToken, async (req, res, next) => {
       return res.status(400).json({ message: 'Invalid body', issues: parsed.error.issues });
     }
 
-    const user = await upsertUserFromFirebase({
-      firebaseUser: req.firebaseUser,
+    const user = await upsertUserFromSupabase({
+      supabaseUser: req.supabaseUser,
       profile: parsed.data,
     });
 
@@ -35,11 +35,11 @@ authRouter.post('/sync-user', verifyFirebaseToken, async (req, res, next) => {
 });
 
 // GET /api/auth/me
-// Authorization: Bearer <Firebase ID Token>
-// Returns the PostgreSQL user row for the authenticated Firebase user.
-authRouter.get('/me', verifyFirebaseToken, async (req, res, next) => {
+// Authorization: Bearer <Supabase JWT>
+// Returns the PostgreSQL user row for the authenticated Supabase user.
+authRouter.get('/me', verifySupabaseToken, async (req, res, next) => {
   try {
-    const user = await getUserByFirebaseUid(req.firebaseUser.uid);
+    const user = await getUserBySupabaseUid(req.supabaseUser.id);
     if (!user) {
       return res.status(404).json({ message: 'User not found. Please register first.' });
     }

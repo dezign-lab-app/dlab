@@ -27,9 +27,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     super.dispose();
   }
 
-  /// Checks Firebase for the email:
+  /// Checks whether the email already has a Supabase account:
   ///   - already exists → go to LoginScreen (sign-in flow)
-  ///   - new email      → go to LoginScreen with flag for sign-up flow
+  ///   - new email      → go to SignUpScreen (sign-up flow)
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
@@ -44,12 +44,20 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       if (!mounted) return;
 
       if (exists) {
-        // Existing account → sign-in screen, pre-filled with email
         context.go(LoginScreen.routePath, extra: email);
       } else {
-        // New account → sign-up screen, pre-filled with email
         context.go(SignUpScreen.routePath, extra: email);
       }
+    } on Exception catch (e) {
+      if (!mounted) return;
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: const Color(0xFFED1010),
+          duration: const Duration(seconds: 5),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _checkingEmail = false);
     }
@@ -355,7 +363,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         child: Padding(
                           padding: const EdgeInsets.only(bottom: 40),
                           child: GestureDetector(
-                            onTap: () => context.go(LoginScreen.routePath),
+                            onTap: () => ref
+                                .read(authStateProvider.notifier)
+                                .continueAsGuest(),
                             child: const Text(
                               'Continue as guest',
                               style: TextStyle(

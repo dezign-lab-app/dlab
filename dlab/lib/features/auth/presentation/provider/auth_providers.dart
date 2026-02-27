@@ -1,10 +1,11 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:firebase_auth/firebase_auth.dart' hide User;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:logger/logger.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 
 import '../../../../core/env/env_selector.dart';
 import '../../../../core/network/dio_client.dart';
@@ -14,63 +15,59 @@ import '../../domain/entities/user.dart';
 import '../../domain/repository/auth_repository.dart';
 
 final loggerProvider = Provider<Logger>((ref) => Logger());
+final envProvider    = Provider((ref) => EnvSelector.current());
 
-final envProvider = Provider((ref) => EnvSelector.current());
-
-/// Dio used by the entire app.
-/// Firebase token is injected automatically before every request.
-/// On 401, the interceptor signs out of Firebase; AuthStateNotifier
-/// listens to authStateChanges and reacts accordingly — no circular dep.
 final dioProvider = Provider<Dio>((ref) {
-  final env = ref.watch(envProvider);
+  final env    = ref.watch(envProvider);
   final logger = ref.watch(loggerProvider);
-  final client = DioClient(env: env, logger: logger);
-  return client.dio;
+  return DioClient(env: env, logger: logger).dio;
 });
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  final dio = ref.watch(dioProvider);
+  final dio    = ref.watch(dioProvider);
   final remote = AuthRemoteDataSourceImpl(dio);
   return AuthRepositoryImpl(remote);
 });
 
-// ── Auth Status ─────────────────────────────────────────────────────────────
+// ── Auth Status ──────────────────────────────────────────────────────────────
 
-sealed class AuthStatus {
-  const AuthStatus();
-}
+sealed class AuthStatus { const AuthStatus(); }
 
-class AuthUnknown extends AuthStatus {
-  const AuthUnknown();
-}
-
-class Authenticated extends AuthStatus {
+class AuthUnknown     extends AuthStatus { const AuthUnknown(); }
+class Authenticated   extends AuthStatus {
   const Authenticated(this.user);
   final User user;
 }
-
-class Unauthenticated extends AuthStatus {
-  const Unauthenticated();
-}
+class Guest           extends AuthStatus { const Guest(); }
+class Unauthenticated extends AuthStatus { const Unauthenticated(); }
 
 // ── Notifier ─────────────────────────────────────────────────────────────────
 
 class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
   AuthStateNotifier(this._repo) : super(const AsyncValue.loading()) {
-    // Only react to Firebase sign-OUT events (e.g. triggered by 401 interceptor).
-    // Sign-IN events are handled explicitly in register/login/signInWithGoogle
-    // to avoid a race condition where the stream fires before syncUser completes.
-    _sub = FirebaseAuth.instance.authStateChanges().listen((firebaseUser) {
-      if (firebaseUser == null && !_isBusy) {
-        state = const AsyncValue.data(Unauthenticated());
+    // Listen to Supabase auth state changes.
+    _sub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (_isBusy || _isPasswordResetFlow) return;
+
+      switch (data.event) {
+        case AuthChangeEvent.signedOut:
+          state = const AsyncValue.data(Unauthenticated());
+        case AuthChangeEvent.signedIn:
+        case AuthChangeEvent.tokenRefreshed:
+          // Handles web OAuth redirect callback — session arrives here.
+          if (data.session != null && state.valueOrNull is! Authenticated) {
+            _syncAfterOAuthRedirect();
+          }
+        default:
+          break;
       }
     });
   }
 
   final AuthRepository _repo;
-  late final StreamSubscription<dynamic> _sub;
-  // Guards against the authStateChanges stream clobbering an in-flight operation.
+  late final StreamSubscription<AuthState> _sub;
   bool _isBusy = false;
+  bool _isPasswordResetFlow = false;
 
   @override
   void dispose() {
@@ -78,83 +75,35 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
     super.dispose();
   }
 
-  /// Called on app start to restore session.
-  Future<void> bootstrap() async {
-    state = const AsyncValue.loading();
-
-    final firebaseUser = FirebaseAuth.instance.currentUser;
-    if (firebaseUser == null) {
-      state = const AsyncValue.data(Unauthenticated());
-      return;
-    }
-
-    try {
-      await firebaseUser.getIdToken(true);
-      final either = await _repo.me();
-      state = either.fold(
-        (l) => const AsyncValue.data(Unauthenticated()),
-        (user) => AsyncValue.data(Authenticated(user)),
-      );
-    } catch (_) {
-      await FirebaseAuth.instance.signOut();
-      state = const AsyncValue.data(Unauthenticated());
-    }
-  }
-
-  /// Checks whether an email address already has an account in Firebase.
-  ///
-  /// Strategy: attempt to CREATE an account with a garbage password.
-  ///   - email-already-in-use → account exists         → true
-  ///   - weak-password        → no account (probe hit) → false (delete it)
-  ///   - user-not-found / any → no account             → false
-  ///
-  /// This works even when Firebase "email enumeration protection" is enabled,
-  /// because `createUserWithEmailAndPassword` always returns
-  /// `email-already-in-use` when the address is taken, regardless of that setting.
-  Future<bool> checkEmailExists(String email) async {
-    try {
-      // Try to register with a garbage password that will never pass validation.
-      final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: email,
-        password: '\x00__probe_9Xq#__',
-      );
-      // If we somehow get here a phantom user was created — delete it immediately.
-      await cred.user?.delete();
-      await FirebaseAuth.instance.signOut();
-      return false;
-    } on FirebaseAuthException catch (e) {
-      if (e.code == 'email-already-in-use') {
-        return true; // ← account exists
-      }
-      // weak-password, invalid-email, network-error, etc. → treat as new user.
-      return false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// Email registration: create in Firebase → sync to PostgreSQL.
-  Future<void> register({
-    required String email,
-    required String password,
-    required String name,
-  }) async {
+  // ── OAuth redirect callback (web Google sign-in) ────────────────────────
+  // Called when the auth stream fires signedIn after a redirect.
+  Future<void> _syncAfterOAuthRedirect() async {
     _isBusy = true;
     state = const AsyncValue.loading();
     try {
-      final cred = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(email: email, password: password);
-      await cred.user?.updateDisplayName(name);
-      // Force-refresh so the display name is in the token claims.
-      await cred.user?.getIdToken(true);
-
-      final either = await _repo.syncUser(fullName: name, provider: 'email');
-      state = either.fold(
-        (l) => AsyncValue.error(l, StackTrace.current),
-        (user) => AsyncValue.data(Authenticated(user)),
-      );
-    } on FirebaseAuthException catch (e) {
-      state = AsyncValue.error(_mapFirebaseError(e), StackTrace.current);
+      final supaUser = Supabase.instance.client.auth.currentUser!;
+      final provider = supaUser.appMetadata['provider'] as String? ?? 'google';
+      try {
+        final either = await _repo.syncUser(provider: provider);
+        state = either.fold(
+          (_) => AsyncValue.data(Authenticated(User(
+            id: supaUser.id,
+            supabaseUid: supaUser.id,
+            email: supaUser.email ?? '',
+            name: supaUser.userMetadata?['full_name'] as String?,
+            authProvider: provider,
+          ))),
+          (user) => AsyncValue.data(Authenticated(user)),
+        );
+      } catch (_) {
+        state = AsyncValue.data(Authenticated(User(
+          id: supaUser.id,
+          supabaseUid: supaUser.id,
+          email: supaUser.email ?? '',
+          name: supaUser.userMetadata?['full_name'] as String?,
+          authProvider: provider,
+        )));
+      }
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     } finally {
@@ -162,7 +111,209 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
     }
   }
 
-  /// Email login: verify via Firebase → fetch user from PostgreSQL.
+  // ── Bootstrap (restore session on app start) ────────────────────────────
+
+  Future<void> bootstrap() async {
+    state = const AsyncValue.loading();
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      state = const AsyncValue.data(Unauthenticated());
+      return;
+    }
+
+    // We have a valid Supabase session — the user IS authenticated.
+    // Try to enrich from the backend, but fall back to Supabase user data
+    // if the backend is unreachable.
+    final supaUser = Supabase.instance.client.auth.currentUser!;
+    try {
+      final either = await _repo.me();
+      state = either.fold(
+        // Backend unreachable / user not synced yet — still authenticated.
+        (_) => AsyncValue.data(Authenticated(User(
+          id: supaUser.id,
+          supabaseUid: supaUser.id,
+          email: supaUser.email ?? '',
+          name: supaUser.userMetadata?['full_name'] as String?,
+          authProvider:
+              supaUser.appMetadata['provider'] as String? ?? 'email',
+        ))),
+        (user) => AsyncValue.data(Authenticated(user)),
+      );
+    } catch (_) {
+      // Even on exception, if we have a session, treat as authenticated.
+      state = AsyncValue.data(Authenticated(User(
+        id: supaUser.id,
+        supabaseUid: supaUser.id,
+        email: supaUser.email ?? '',
+        name: supaUser.userMetadata?['full_name'] as String?,
+        authProvider:
+            supaUser.appMetadata['provider'] as String? ?? 'email',
+      )));
+    }
+  }
+
+  // ── Check email exists (register screen) ────────────────────────────────
+  // Supabase behaviour differs based on "Email Enumeration Protection" setting:
+  //
+  // Protection OFF (recommended for dev):
+  //   • Existing email → throws AuthException("User already registered")
+  //   • New email      → returns user with identities list non-empty
+  //
+  // Protection ON (Supabase default):
+  //   • Existing email → returns user with EMPTY identities list, session=null
+  //   • New email      → returns user with identities list non-empty
+  //
+  // NETWORK ERROR: throws Exception so caller can show an error instead of
+  // silently routing a real user to the signup page.
+  //
+  // Returns true if email exists, false if new.
+  // Throws Exception on network/connectivity errors.
+  Future<bool> checkEmailExists(String email) async {
+    try {
+      final res = await Supabase.instance.client.auth.signUp(
+        email: email,
+        password: r'Pr0be!Only#ShouldNeverCreate_X9z',
+      );
+
+      // Email Enumeration Protection ON:
+      // Existing email comes back as user with empty identities list.
+      final identities = res.user?.identities;
+      if (identities != null && identities.isEmpty) {
+        await Supabase.instance.client.auth.signOut();
+        return true; // email exists
+      }
+
+      // Genuinely new user was created — clean up immediately.
+      if (res.user != null) {
+        await Supabase.instance.client.auth.signOut();
+      }
+      return false; // new email
+    } on AuthException catch (e) {
+      final msg = e.message.toLowerCase();
+      // Protection OFF: explicit error for existing email.
+      if (msg.contains('already registered') || msg.contains('already exists')) {
+        return true;
+      }
+      // Rethrow so the UI shows the real error (e.g. rate limit).
+      throw Exception(e.message);
+    } catch (e) {
+      // Network failure (Failed to fetch, SocketException, etc.)
+      // Rethrow with a user-friendly message so the register screen shows
+      // an error instead of silently sending the user to signup.
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('failed to fetch') ||
+          msg.contains('socketexception') ||
+          msg.contains('network') ||
+          msg.contains('connection') ||
+          msg.contains('timeout')) {
+        throw Exception(
+          'Cannot connect to server. Please check your internet connection and try again.',
+        );
+      }
+      throw Exception('Something went wrong. Please try again.');
+    }
+  }
+
+  // ── Send OTP (signup step 1) ─────────────────────────────────────────────
+  // When "Confirm Email" is ON in Supabase, calling signUp() creates an
+  // unconfirmed user and emails a 6-digit confirmation code (using the
+  // {{ .Token }} placeholder in the "Confirm signup" email template).
+  //
+  // The OTP is verified later with OtpType.signup in verifyOtpAndRegister().
+  //
+  // Returns null on success, error string on failure.
+  Future<String?> sendOtp({
+    required String email,
+    required String name,
+    required String password,
+  }) async {
+    try {
+      await Supabase.instance.client.auth.signUp(
+        email: email,
+        password: password,
+        data: {'full_name': name},
+      );
+      return null;
+    } on AuthException catch (e) {
+      return e.message;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  // ── Verify OTP + complete signup ─────────────────────────────────────────
+  // Called from SignupVerificationScreen.
+  // 1. Verify the OTP code with Supabase (signs in the session).
+  // 2. Update the user's password + display name.
+  // 3. Sync to PostgreSQL via backend.
+  Future<void> verifyOtpAndRegister({
+    required String email,
+    required String name,
+    required String password,
+    required String otp,
+  }) async {
+    _isBusy = true;
+    state = const AsyncValue.loading();
+    try {
+      // Step 1: verify the 6-digit email OTP.
+      // Use OtpType.signup when "Confirm Email" is enabled in Supabase,
+      // so this verifies the signup confirmation token (not the magic-link one).
+      final res = await Supabase.instance.client.auth.verifyOTP(
+        email: email,
+        token: otp,
+        type: OtpType.signup,
+      );
+
+      if (res.user == null) {
+        state = AsyncValue.error(
+          Exception('OTP verification failed. Please try again.'),
+          StackTrace.current,
+        );
+        return;
+      }
+
+      // Step 2: The password was already set during signUp(), so we only
+      // need to ensure the display name is stored in user metadata.
+      await Supabase.instance.client.auth.updateUser(
+        UserAttributes(data: {'full_name': name}),
+      );
+
+      // Step 3: sync to PostgreSQL (best-effort — backend may not be running
+      // in dev; auth succeeds regardless).
+      final supaUser = Supabase.instance.client.auth.currentUser!;
+      try {
+        final either = await _repo.syncUser(fullName: name, provider: 'email');
+        state = either.fold(
+          (_) => AsyncValue.data(Authenticated(User(
+            id: supaUser.id,
+            supabaseUid: supaUser.id,
+            email: supaUser.email ?? email,
+            name: name,
+            authProvider: 'email',
+          ))),
+          (user) => AsyncValue.data(Authenticated(user)),
+        );
+      } catch (_) {
+        // Backend unreachable — still mark as authenticated with Supabase data.
+        state = AsyncValue.data(Authenticated(User(
+          id: supaUser.id,
+          supabaseUid: supaUser.id,
+          email: supaUser.email ?? email,
+          name: name,
+          authProvider: 'email',
+        )));
+      }
+    } on AuthException catch (e) {
+      state = AsyncValue.error(Exception(_mapSupabaseError(e)), StackTrace.current);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    } finally {
+      _isBusy = false;
+    }
+  }
+
+  // ── Email login ──────────────────────────────────────────────────────────
+
   Future<void> login({
     required String email,
     required String password,
@@ -170,16 +321,32 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
     _isBusy = true;
     state = const AsyncValue.loading();
     try {
-      await FirebaseAuth.instance
-          .signInWithEmailAndPassword(email: email, password: password);
-      // Token injected automatically by Dio interceptor.
-      final either = await _repo.me();
-      state = either.fold(
-        (l) => AsyncValue.error(l, StackTrace.current),
-        (user) => AsyncValue.data(Authenticated(user)),
+      await Supabase.instance.client.auth.signInWithPassword(
+        email: email,
+        password: password,
       );
-    } on FirebaseAuthException catch (e) {
-      state = AsyncValue.error(_mapFirebaseError(e), StackTrace.current);
+      final supaUser = Supabase.instance.client.auth.currentUser!;
+      try {
+        final either = await _repo.me();
+        state = either.fold(
+          (_) => AsyncValue.data(Authenticated(User(
+            id: supaUser.id,
+            supabaseUid: supaUser.id,
+            email: supaUser.email ?? email,
+            authProvider: 'email',
+          ))),
+          (user) => AsyncValue.data(Authenticated(user)),
+        );
+      } catch (_) {
+        state = AsyncValue.data(Authenticated(User(
+          id: supaUser.id,
+          supabaseUid: supaUser.id,
+          email: supaUser.email ?? email,
+          authProvider: 'email',
+        )));
+      }
+    } on AuthException catch (e) {
+      state = AsyncValue.error(Exception(_mapSupabaseError(e)), StackTrace.current);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     } finally {
@@ -187,31 +354,83 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
     }
   }
 
-  /// Google sign-in: Firebase credential → UPSERT in PostgreSQL.
+  // ── Google Sign-In ───────────────────────────────────────────────────────
+  // Web: uses Supabase OAuth redirect (google_sign_in doesn't support web).
+  // Mobile: uses google_sign_in package → signInWithIdToken.
+
   Future<void> signInWithGoogle() async {
     _isBusy = true;
     state = const AsyncValue.loading();
     try {
-      final googleUser = await GoogleSignIn().signIn();
+      if (kIsWeb) {
+        // On web, trigger Supabase's OAuth redirect flow.
+        // The user will be redirected back to the app after authentication.
+        await Supabase.instance.client.auth.signInWithOAuth(
+          OAuthProvider.google,
+          redirectTo: 'http://localhost:${Uri.base.port}',
+          authScreenLaunchMode: LaunchMode.platformDefault,
+        );
+        // After redirect comes back, the onAuthStateChange stream fires
+        // and bootstrap() / the auth listener will handle the session.
+        // We reset state here so the UI doesn't stay in loading forever.
+        state = const AsyncValue.data(Unauthenticated());
+        return;
+      }
+
+      // ── Mobile (Android / iOS) ─────────────────────────────────────────
+      const webClientId =
+          '787837219490-4a0oq0dncn03s5lv0qfhvkceaknh1jjs.apps.googleusercontent.com';
+
+      final googleSignIn = GoogleSignIn(serverClientId: webClientId);
+      final googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
         state = const AsyncValue.data(Unauthenticated());
         return;
       }
 
-      final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
+      final googleAuth  = await googleUser.authentication;
+      final idToken     = googleAuth.idToken;
+      final accessToken = googleAuth.accessToken;
+
+      if (idToken == null) {
+        state = AsyncValue.error(
+          Exception('Google sign-in failed: no ID token received'),
+          StackTrace.current,
+        );
+        return;
+      }
+
+      await Supabase.instance.client.auth.signInWithIdToken(
+        provider: OAuthProvider.google,
+        idToken: idToken,
+        accessToken: accessToken,
       );
 
-      await FirebaseAuth.instance.signInWithCredential(credential);
-      final either = await _repo.syncUser(provider: 'google');
-      state = either.fold(
-        (l) => AsyncValue.error(l, StackTrace.current),
-        (user) => AsyncValue.data(Authenticated(user)),
-      );
-    } on FirebaseAuthException catch (e) {
-      state = AsyncValue.error(_mapFirebaseError(e), StackTrace.current);
+      final supaUser = Supabase.instance.client.auth.currentUser!;
+      try {
+        final either = await _repo.syncUser(provider: 'google');
+        state = either.fold(
+          (_) => AsyncValue.data(Authenticated(User(
+            id: supaUser.id,
+            supabaseUid: supaUser.id,
+            email: supaUser.email ?? '',
+            name: supaUser.userMetadata?['full_name'] as String?,
+            authProvider: 'google',
+          ))),
+          (user) => AsyncValue.data(Authenticated(user)),
+        );
+      } catch (_) {
+        state = AsyncValue.data(Authenticated(User(
+          id: supaUser.id,
+          supabaseUid: supaUser.id,
+          email: supaUser.email ?? '',
+          name: supaUser.userMetadata?['full_name'] as String?,
+          authProvider: 'google',
+        )));
+      }
+    } on AuthException catch (e) {
+      state = AsyncValue.error(
+          Exception(_mapSupabaseError(e)), StackTrace.current);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     } finally {
@@ -219,34 +438,128 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
     }
   }
 
-  /// Logout: sign out of Google + Firebase; authStateChanges listener
-  /// will set state to Unauthenticated automatically.
+  // ── Logout ───────────────────────────────────────────────────────────────
+
   Future<void> logout() async {
     state = const AsyncValue.loading();
     await GoogleSignIn().signOut();
-    await FirebaseAuth.instance.signOut();
+    await Supabase.instance.client.auth.signOut();
+    // onAuthStateChange stream will fire signedOut → sets Unauthenticated.
   }
 
-  /// Called externally if needed (e.g. from UI layer).
+  void continueAsGuest() {
+    state = const AsyncValue.data(Guest());
+  }
+
   void setUnauthenticated() {
     state = const AsyncValue.data(Unauthenticated());
   }
 
-  Exception _mapFirebaseError(FirebaseAuthException e) {
-    switch (e.code) {
-      case 'user-not-found':
-      case 'wrong-password':
-      case 'invalid-credential':
-        return Exception('Invalid email or password');
-      case 'email-already-in-use':
-        return Exception('An account with this email already exists');
-      case 'weak-password':
-        return Exception('Password must be at least 6 characters');
-      case 'network-request-failed':
-        return Exception('No internet connection');
-      default:
-        return Exception(e.message ?? 'Authentication failed');
+  // ── Forgot-password: send OTP to email ───────────────────────────────────
+  // Returns null on success, error string on failure.
+  Future<String?> sendPasswordResetOtp(String email) async {
+    try {
+      await Supabase.instance.client.auth.signInWithOtp(
+        email: email,
+        shouldCreateUser: false,
+      );
+      return null;
+    } on AuthException catch (e) {
+      return _mapSupabaseError(e);
+    } catch (e) {
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('failed to fetch') ||
+          msg.contains('socketexception') ||
+          msg.contains('network') ||
+          msg.contains('connection') ||
+          msg.contains('timeout')) {
+        return 'Cannot connect to server. Please check your internet connection.';
+      }
+      return 'Something went wrong. Please try again.';
     }
+  }
+
+  // ── Forgot-password: verify OTP ──────────────────────────────────────────
+  // Verifies the 6-digit code. On success a session is created so that
+  // updateUser (to set the new password) can be called immediately.
+  //
+  // Uses OtpType.magiclink because sendPasswordResetOtp() calls
+  // signInWithOtp(shouldCreateUser: false) which generates a magic-link
+  // type token. Supabase still sends a 6-digit code in the email template
+  // when {{ .Token }} is used — the OtpType just tells verifyOTP which
+  // token bucket to look up.
+  //
+  // Returns null on success, error string on failure.
+  Future<String?> verifyPasswordResetOtp({
+    required String email,
+    required String otp,
+  }) async {
+    try {
+      _isPasswordResetFlow = true;
+      final res = await Supabase.instance.client.auth.verifyOTP(
+        email: email,
+        token: otp,
+        type: OtpType.magiclink,
+      );
+      if (res.user == null) {
+        _isPasswordResetFlow = false;
+        return 'Invalid verification code. Please try again.';
+      }
+      return null;
+    } on AuthException catch (e) {
+      _isPasswordResetFlow = false;
+      return _mapSupabaseError(e);
+    } catch (e) {
+      _isPasswordResetFlow = false;
+      return e.toString();
+    }
+  }
+
+  // ── Forgot-password: set new password ────────────────────────────────────
+  // Must be called AFTER verifyPasswordResetOtp succeeds (session active).
+  // Returns null on success, error string on failure.
+  Future<String?> resetPassword(String newPassword) async {
+    try {
+      await Supabase.instance.client.auth.updateUser(
+        UserAttributes(password: newPassword),
+      );
+      // Sign out so the user must log in with the new password.
+      _isPasswordResetFlow = false;
+      await Supabase.instance.client.auth.signOut();
+      return null;
+    } on AuthException catch (e) {
+      _isPasswordResetFlow = false;
+      return _mapSupabaseError(e);
+    } catch (e) {
+      _isPasswordResetFlow = false;
+      return e.toString();
+    }
+  }
+
+  // ── Error mapping ────────────────────────────────────────────────────────
+
+  String _mapSupabaseError(AuthException e) {
+    final msg = e.message.toLowerCase();
+    if (msg.contains('invalid login') || msg.contains('invalid credentials') ||
+        msg.contains('wrong password')) {
+      return 'Invalid email or password';
+    }
+    if (msg.contains('email not confirmed')) {
+      return 'Please verify your email before signing in';
+    }
+    if (msg.contains('user not found')) {
+      return 'No account found with this email';
+    }
+    if (msg.contains('token') && msg.contains('invalid')) {
+      return 'Incorrect verification code';
+    }
+    if (msg.contains('expired')) {
+      return 'Verification code has expired. Please request a new one';
+    }
+    if (msg.contains('rate limit') || msg.contains('too many')) {
+      return 'Too many attempts. Please wait a moment and try again';
+    }
+    return e.message;
   }
 }
 

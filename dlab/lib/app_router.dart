@@ -6,8 +6,11 @@ import 'features/auth/presentation/provider/auth_providers.dart';
 import 'features/auth/presentation/screens/forgot_password_screen.dart';
 import 'features/auth/presentation/screens/login_screen.dart';
 import 'features/auth/presentation/screens/register_screen.dart';
+import 'features/auth/presentation/screens/reset_password_screen.dart';
 import 'features/auth/presentation/screens/signup_screen.dart';
+import 'features/auth/presentation/screens/signup_verification_screen.dart';
 import 'features/auth/presentation/screens/splash_screen.dart';
+import 'features/auth/presentation/screens/verification_screen.dart';
 import 'features/home/presentation/screens/dlabs_home_page.dart';
 import 'features/onboarding/presentation/provider/onboarding_providers.dart';
 import 'features/onboarding/presentation/screens/dlab_splash_screen.dart';
@@ -34,8 +37,20 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const SignUpScreen(),
       ),
       GoRoute(
+        path: SignupVerificationScreen.routePath,
+        builder: (_, state) => const SignupVerificationScreen(),
+      ),
+      GoRoute(
         path: ForgotPasswordScreen.routePath,
         builder: (_, __) => const ForgotPasswordScreen(),
+      ),
+      GoRoute(
+        path: VerificationScreen.routePath,
+        builder: (_, __) => const VerificationScreen(),
+      ),
+      GoRoute(
+        path: ResetPasswordScreen.routePath,
+        builder: (_, __) => const ResetPasswordScreen(),
       ),
       GoRoute(
         path: RegisterScreen.routePath,
@@ -80,15 +95,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       final isAuth = location == LoginScreen.routePath ||
           location == RegisterScreen.routePath ||
           location == SignUpScreen.routePath ||
-          location == ForgotPasswordScreen.routePath;
+          location == SignupVerificationScreen.routePath ||
+          location == ForgotPasswordScreen.routePath ||
+          location == VerificationScreen.routePath ||
+          location == ResetPasswordScreen.routePath;
 
       final isHome = location == DLabsHomePage.routePath;
 
-      // Check if the user is authenticated.
+      // Check if the user is authenticated or browsing as guest.
       final isAuthenticated = authState.valueOrNull is Authenticated;
+      final isGuest         = authState.valueOrNull is Guest;
 
-      // If authenticated, always go to home (unless already there).
-      if (isAuthenticated && !isHome) {
+      // If authenticated or guest, always go to home (unless already there).
+      if ((isAuthenticated || isGuest) && !isHome) {
         return DLabsHomePage.routePath;
       }
 

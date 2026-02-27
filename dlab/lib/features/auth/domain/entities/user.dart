@@ -3,7 +3,7 @@ import 'package:equatable/equatable.dart';
 class User extends Equatable {
   const User({
     required this.id,
-    required this.firebaseUid,
+    required this.supabaseUid,
     required this.email,
     this.name,
     this.phone,
@@ -14,16 +14,16 @@ class User extends Equatable {
   });
 
   final String id;           // PostgreSQL UUID
-  final String firebaseUid;
+  final String supabaseUid;  // Supabase auth.users uid
   final String email;
-  final String? name;         // schema: name
+  final String? name;
   final String? phone;
-  final String? avatar;       // schema: avatar
-  final String? authProvider; // schema: auth_provider  ('email' | 'google')
+  final String? avatar;
+  final String? authProvider; // 'email' | 'google'
   final bool isActive;
   final bool isBlocked;
 
   @override
-  List<Object?> get props => [id, firebaseUid, email, name, phone, avatar, authProvider, isActive, isBlocked];
+  List<Object?> get props => [id, supabaseUid, email, name, phone, avatar, authProvider, isActive, isBlocked];
 }
 

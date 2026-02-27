@@ -1,15 +1,8 @@
 import 'package:dio/dio.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:logger/logger.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-// TokenPair kept so DioClient signature compiles until DioClient is removed/refactored.
-class TokenPair {
-  TokenPair({required this.accessToken, required this.refreshToken});
-  final String accessToken;
-  final String refreshToken;
-}
-
-List<Interceptor> buildFirebaseInterceptors({
+List<Interceptor> buildInterceptors({
   required Dio dio,
   required Logger logger,
   required bool enableLogs,
@@ -17,19 +10,16 @@ List<Interceptor> buildFirebaseInterceptors({
   return [
     InterceptorsWrapper(
       onRequest: (options, handler) async {
-        final firebaseUser = FirebaseAuth.instance.currentUser;
-        if (firebaseUser != null) {
-          // getIdToken() auto-refreshes if the token is expired (~1 h).
-          final token = await firebaseUser.getIdToken();
-          options.headers['Authorization'] = 'Bearer $token';
+        final session = Supabase.instance.client.auth.currentSession;
+        if (session != null) {
+          options.headers['Authorization'] = 'Bearer ${session.accessToken}';
         }
         handler.next(options);
       },
       onError: (error, handler) async {
         if (error.response?.statusCode == 401) {
-          // Sign out from Firebase; AuthStateNotifier listens to
-          // authStateChanges and will set state = Unauthenticated.
-          await FirebaseAuth.instance.signOut();
+          // Token expired — sign out so AuthStateNotifier picks it up.
+          await Supabase.instance.client.auth.signOut();
         }
         handler.next(error);
       },
@@ -45,9 +35,13 @@ List<Interceptor> buildFirebaseInterceptors({
         logPrint: (obj) {
           final str = obj
               .toString()
-              .replaceAll(RegExp(r'Authorization: Bearer .*', caseSensitive: false), 'Authorization: ***');
+              .replaceAll(
+                RegExp(r'Authorization: Bearer .*', caseSensitive: false),
+                'Authorization: ***',
+              );
           logger.d(str);
         },
       ),
   ];
 }
+

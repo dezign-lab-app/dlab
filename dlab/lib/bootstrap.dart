@@ -1,26 +1,19 @@
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'core/services/push_notification_service.dart';
-import 'firebase_options.dart';
+import 'core/network/platform_http_client.dart';
 
 Future<void> bootstrap(ProviderContainer container) async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase with the platform-specific options generated from
-  // google-services.json / GoogleService-Info.plist.
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  // Install native HttpOverrides (no-op on web).
+  installNativeHttpOverrides();
 
-  // Optional: request push-notification permissions and fetch FCM token.
-  try {
-    final service = PushNotificationService(FirebaseMessaging.instance);
-    await service.requestPermissions();
-    await service.getFcmToken();
-  } catch (_) {
-    // FCM is non-critical — ignore failures (e.g. emulator without GMS).
-  }
+  await Supabase.initialize(
+    url: 'https://zzqeibxwasikdmdoijfb.supabase.co',
+    anonKey:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp6cWVpYnh3YXNpa2RtZG9pamZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5OTQwMTAsImV4cCI6MjA4NzU3MDAxMH0.guvKAPuNIw8Ln5m-r6i99eGu2tOjuHvNArYfh9Q2Prk',
+  );
 }
+

@@ -22,7 +22,7 @@ class DioClient {
           ),
         ) {
     dio.interceptors.addAll(
-      buildFirebaseInterceptors(
+      buildInterceptors(
         dio: dio,
         logger: logger,
         enableLogs: env.enableNetworkLogs,
