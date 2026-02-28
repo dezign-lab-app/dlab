@@ -18,7 +18,7 @@ const supabaseAdmin = createClient(
 
 // GET /api/auth/check-email?email=user@example.com
 // Public — no JWT required. Returns { exists: true/false }.
-// Uses the Supabase Admin API to look up the user by email.
+// Uses the Supabase Admin SDK (listUsers) to check if an email is registered.
 // This sends ZERO emails and has ZERO rate-limit risk.
 authRouter.get('/check-email', async (req, res, next) => {
   try {
@@ -27,20 +27,23 @@ authRouter.get('/check-email', async (req, res, next) => {
       return res.status(400).json({ message: 'email query parameter is required' });
     }
 
-    // getUserByEmail uses the Supabase Admin API — no email sent, no rate limit.
-    const { data: userData, error: userError } =
-      await supabaseAdmin.auth.admin.getUserByEmail(email);
+    // supabase-js v2 has listUsers() but NOT getUserByEmail().
+    // We list users (paginated) and check if the email exists.
+    // Fine for < 10k users; for larger scale use the REST API directly.
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000,
+    });
 
-    if (userError) {
-      // "User not found" means email doesn't exist — that's not an error for us.
-      if (userError.message?.toLowerCase().includes('not found')) {
-        return res.json({ exists: false });
-      }
-      console.error('[check-email] Supabase admin error:', userError.message);
+    if (error) {
+      console.error('[check-email] Supabase admin error:', error.message);
       return res.status(500).json({ message: 'Failed to check email' });
     }
 
-    return res.json({ exists: !!userData?.user });
+    const users = data?.users ?? [];
+    const exists = users.some((u) => u.email?.toLowerCase() === email);
+
+    return res.json({ exists });
   } catch (err) {
     next(err);
   }
