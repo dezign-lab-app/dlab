@@ -30,4 +30,14 @@ class AuthRepositoryImpl implements AuthRepository {
       return Left(NetworkFailureMapper.fromDio(e));
     }
   }
+
+  @override
+  Future<Either<Failure, bool>> checkEmail(String email) async {
+    try {
+      final exists = await _remote.checkEmail(email);
+      return Right(exists);
+    } catch (e) {
+      return Left(NetworkFailureMapper.fromDio(e));
+    }
+  }
 }

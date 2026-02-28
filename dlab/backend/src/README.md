@@ -1,19 +1,22 @@
 # dlab-backend
 
-Express + Firebase Admin + PostgreSQL.
+Express + Supabase Auth + PostgreSQL.
 
 ## Setup
 
 1) Copy `.env.example` to `.env` and fill values.
-2) Put your Firebase Admin service account JSON at the path in `FIREBASE_SERVICE_ACCOUNT_PATH`.
-3) Ensure the VPS Postgres has the `users` table you shared.
+2) Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from Supabase Dashboard → Settings → API.
+3) Ensure the VPS Postgres has the `users` table (see `schema.sql` in project root).
 
 ## Endpoints
 
-- `GET /health`
-- `POST /api/auth/sync-user` (Authorization: Bearer <Firebase ID Token>)
+- `GET  /health` — server health check
+- `GET  /health/db` — PostgreSQL connectivity check
+- `GET  /api/auth/check-email?email=...` — check if email exists (public, no JWT)
+- `POST /api/auth/sync-user` (Authorization: Bearer \<Supabase JWT\>)
+- `GET  /api/auth/me` (Authorization: Bearer \<Supabase JWT\>)
 
 ## Notes
 
-- Do **not** commit `serviceAccount.json`.
-- Use the Firebase ID token from Flutter in the `Authorization` header.
+- Do **not** commit `.env` or any secret keys.
+- Use the Supabase JWT from Flutter in the `Authorization` header.

@@ -153,39 +153,27 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
   }
 
   // ── Check email exists (register screen) ────────────────────────────────
-  // Uses signInWithOtp(shouldCreateUser: false) which:
-  //   • Existing email → succeeds silently (no email sent — we immediately
-  //     cancel by NOT storing the session; we just need the success/error signal)
-  //   • New email      → throws AuthException with "Email not found" / similar
-  //
-  // This approach NEVER calls signUp(), so it NEVER sends an unsolicited OTP
-  // and NEVER creates a ghost user account.
+  // Calls the backend endpoint GET /api/auth/check-email?email=...
+  // which uses the Supabase Admin API (service-role key) to look up the
+  // user by email. This sends ZERO emails, has ZERO rate-limit risk,
+  // and works regardless of Email Enumeration Protection setting.
   //
   // Returns true if email exists, false if new.
   // Throws Exception on network/connectivity errors.
   Future<bool> checkEmailExists(String email) async {
     try {
-      await Supabase.instance.client.auth.signInWithOtp(
-        email: email,
-        shouldCreateUser: false, // key: don't create, don't send OTP if new
+      final either = await _repo.checkEmail(email);
+      return either.fold(
+        // Backend unreachable — throw so the UI shows a connectivity error.
+        (failure) => throw Exception(
+          'Cannot connect to server. Please check your internet connection and try again.',
+        ),
+        (exists) => exists,
       );
-      // If we reach here without exception, the email exists in Supabase.
-      return true;
-    } on AuthException catch (e) {
-      final msg = e.message.toLowerCase();
-      // Supabase returns this when shouldCreateUser=false and email not found.
-      if (msg.contains('email not found') ||
-          msg.contains('user not found') ||
-          msg.contains('no user found') ||
-          msg.contains('signups not allowed') ||
-          msg.contains('not found')) {
-        return false; // new email → go to signup
-      }
-      // Rate limit or other auth error — surface it.
-      throw Exception(e.message);
     } catch (e) {
       final msg = e.toString().toLowerCase();
-      if (msg.contains('failed to fetch') ||
+      if (msg.contains('cannot connect') ||
+          msg.contains('failed to fetch') ||
           msg.contains('socketexception') ||
           msg.contains('network') ||
           msg.contains('connection') ||
@@ -194,7 +182,7 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
           'Cannot connect to server. Please check your internet connection and try again.',
         );
       }
-      throw Exception('Something went wrong. Please try again.');
+      rethrow;
     }
   }
 
