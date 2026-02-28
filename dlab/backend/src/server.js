@@ -7,9 +7,29 @@ import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
 
+// Allowed origins from .env, plus any localhost origin (any port) for local dev.
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : [];
+
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, curl, Postman).
+      if (!origin) return callback(null, true);
+
+      // Allow any localhost origin regardless of port — needed for Flutter web dev.
+      if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+
+      // Allow explicitly listed origins from .env.
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      callback(new Error(`CORS: origin '${origin}' not allowed`));
+    },
     credentials: true,
   }),
 );

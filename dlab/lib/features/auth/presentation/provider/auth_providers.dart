@@ -161,29 +161,27 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
   // Returns true if email exists, false if new.
   // Throws Exception on network/connectivity errors.
   Future<bool> checkEmailExists(String email) async {
-    try {
-      final either = await _repo.checkEmail(email);
-      return either.fold(
-        // Backend unreachable — throw so the UI shows a connectivity error.
-        (failure) => throw Exception(
-          'Cannot connect to server. Please check your internet connection and try again.',
-        ),
-        (exists) => exists,
-      );
-    } catch (e) {
-      final msg = e.toString().toLowerCase();
-      if (msg.contains('cannot connect') ||
-          msg.contains('failed to fetch') ||
-          msg.contains('socketexception') ||
-          msg.contains('network') ||
-          msg.contains('connection') ||
-          msg.contains('timeout')) {
-        throw Exception(
-          'Cannot connect to server. Please check your internet connection and try again.',
-        );
-      }
-      rethrow;
-    }
+    final either = await _repo.checkEmail(email);
+    return either.fold(
+      (failure) {
+        final msg = failure.message.toLowerCase();
+        // Connectivity / timeout errors → user-friendly message.
+        if (msg.contains('no internet') ||
+            msg.contains('timed out') ||
+            msg.contains('timeout') ||
+            msg.contains('connection') ||
+            msg.contains('socket') ||
+            msg.contains('network') ||
+            msg.contains('failed to fetch')) {
+          throw Exception(
+            'Cannot connect to server. Please check your internet connection and try again.',
+          );
+        }
+        // Any other backend error (4xx / 5xx) → surface the real message.
+        throw Exception(failure.message.isNotEmpty ? failure.message : 'Failed to check email. Please try again.');
+      },
+      (exists) => exists,
+    );
   }
 
   // ── Send OTP (signup step 1) ─────────────────────────────────────────────
