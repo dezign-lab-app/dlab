@@ -58,6 +58,17 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
     if (!mounted) return;
 
     if (error != null) {
+      if (error == 'EMAIL_EXISTS') {
+        // Email already registered — redirect to login screen.
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This email is already registered. Please log in.'),
+            backgroundColor: Color(0xFF374151),
+          ),
+        );
+        context.go(LoginScreen.routePath, extra: email);
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error)),
       );

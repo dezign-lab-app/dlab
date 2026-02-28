@@ -153,53 +153,37 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
   }
 
   // ── Check email exists (register screen) ────────────────────────────────
-  // Supabase behaviour differs based on "Email Enumeration Protection" setting:
+  // Uses signInWithOtp(shouldCreateUser: false) which:
+  //   • Existing email → succeeds silently (no email sent — we immediately
+  //     cancel by NOT storing the session; we just need the success/error signal)
+  //   • New email      → throws AuthException with "Email not found" / similar
   //
-  // Protection OFF (recommended for dev):
-  //   • Existing email → throws AuthException("User already registered")
-  //   • New email      → returns user with identities list non-empty
-  //
-  // Protection ON (Supabase default):
-  //   • Existing email → returns user with EMPTY identities list, session=null
-  //   • New email      → returns user with identities list non-empty
-  //
-  // NETWORK ERROR: throws Exception so caller can show an error instead of
-  // silently routing a real user to the signup page.
+  // This approach NEVER calls signUp(), so it NEVER sends an unsolicited OTP
+  // and NEVER creates a ghost user account.
   //
   // Returns true if email exists, false if new.
   // Throws Exception on network/connectivity errors.
   Future<bool> checkEmailExists(String email) async {
     try {
-      final res = await Supabase.instance.client.auth.signUp(
+      await Supabase.instance.client.auth.signInWithOtp(
         email: email,
-        password: r'Pr0be!Only#ShouldNeverCreate_X9z',
+        shouldCreateUser: false, // key: don't create, don't send OTP if new
       );
-
-      // Email Enumeration Protection ON:
-      // Existing email comes back as user with empty identities list.
-      final identities = res.user?.identities;
-      if (identities != null && identities.isEmpty) {
-        await Supabase.instance.client.auth.signOut();
-        return true; // email exists
-      }
-
-      // Genuinely new user was created — clean up immediately.
-      if (res.user != null) {
-        await Supabase.instance.client.auth.signOut();
-      }
-      return false; // new email
+      // If we reach here without exception, the email exists in Supabase.
+      return true;
     } on AuthException catch (e) {
       final msg = e.message.toLowerCase();
-      // Protection OFF: explicit error for existing email.
-      if (msg.contains('already registered') || msg.contains('already exists')) {
-        return true;
+      // Supabase returns this when shouldCreateUser=false and email not found.
+      if (msg.contains('email not found') ||
+          msg.contains('user not found') ||
+          msg.contains('no user found') ||
+          msg.contains('signups not allowed') ||
+          msg.contains('not found')) {
+        return false; // new email → go to signup
       }
-      // Rethrow so the UI shows the real error (e.g. rate limit).
+      // Rate limit or other auth error — surface it.
       throw Exception(e.message);
     } catch (e) {
-      // Network failure (Failed to fetch, SocketException, etc.)
-      // Rethrow with a user-friendly message so the register screen shows
-      // an error instead of silently sending the user to signup.
       final msg = e.toString().toLowerCase();
       if (msg.contains('failed to fetch') ||
           msg.contains('socketexception') ||
@@ -221,7 +205,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
   //
   // The OTP is verified later with OtpType.signup in verifyOtpAndRegister().
   //
-  // Returns null on success, error string on failure.
+  // Returns null on success.
+  // Returns 'EMAIL_EXISTS' sentinel if email is already registered (caller
+  // should redirect to login).
+  // Returns error string on other failures.
   Future<String?> sendOtp({
     required String email,
     required String name,
@@ -235,6 +222,12 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
       );
       return null;
     } on AuthException catch (e) {
+      final msg = e.message.toLowerCase();
+      if (msg.contains('already registered') ||
+          msg.contains('already exists') ||
+          msg.contains('user already')) {
+        return 'EMAIL_EXISTS';
+      }
       return e.message;
     } catch (e) {
       return e.toString();
