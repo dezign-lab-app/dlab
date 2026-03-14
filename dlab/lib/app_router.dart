@@ -11,6 +11,7 @@ import 'features/auth/presentation/screens/signup_screen.dart';
 import 'features/auth/presentation/screens/signup_verification_screen.dart';
 import 'features/auth/presentation/screens/splash_screen.dart';
 import 'features/auth/presentation/screens/verification_screen.dart';
+import 'features/auth/presentation/screens/profile_details_screen.dart';
 import 'features/home/presentation/screens/dlabs_home_page.dart';
 import 'features/onboarding/presentation/provider/onboarding_providers.dart';
 import 'features/onboarding/presentation/screens/dlab_splash_screen.dart';
@@ -80,6 +81,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: DLabsHomePage.routePath,
         builder: (_, __) => const DLabsHomePage(),
       ),
+      GoRoute(
+        path: ProfileDetailsScreen.routePath,
+        builder: (_, __) => const ProfileDetailsScreen(),
+      ),
     ],
     redirect: (context, state) {
       final flow = ref.read(onboardingFlowProvider);
@@ -100,15 +105,44 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           location == VerificationScreen.routePath ||
           location == ResetPasswordScreen.routePath;
 
-      final isHome = location == DLabsHomePage.routePath;
+      final isHome           = location == DLabsHomePage.routePath;
+      final isProfileDetails = location == ProfileDetailsScreen.routePath;
+
+      // While auth is still resolving, don't redirect — wait for real state.
+      if (authState.isLoading) return null;
 
       // Check if the user is authenticated or browsing as guest.
       final isAuthenticated = authState.valueOrNull is Authenticated;
       final isGuest         = authState.valueOrNull is Guest;
 
-      // If authenticated or guest, always go to home (unless already there).
-      if ((isAuthenticated || isGuest) && !isHome) {
-        return DLabsHomePage.routePath;
+      // Guest → go straight to home; profile-details is never shown for guests.
+      if (isGuest && !isHome) return DLabsHomePage.routePath;
+
+      if (isAuthenticated) {
+        // User explicitly skipped profile setup this session → let them through.
+        final skipped = ref.read(profileSkippedProvider);
+
+        if (!skipped) {
+          final profileState = ref.read(profileProvider);
+
+          // Wait for profile fetch to complete before deciding.
+          if (profileState.isLoading) return null;
+
+          final profileComplete =
+              profileState.valueOrNull?.isComplete ?? false;
+
+          // Incomplete profile → must fill in details first.
+          if (!profileComplete && !isProfileDetails) {
+            return ProfileDetailsScreen.routePath;
+          }
+        }
+
+        // Profile complete (or skipped) and arriving from auth/onboarding → home.
+        if (isAuth || isOnboarding || isStaticSplash) {
+          return DLabsHomePage.routePath;
+        }
+
+        return null;
       }
 
       // Phase 1: show static splash for a few seconds.
@@ -117,9 +151,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       }
 
       // Phase 2: after splash delay, default user to onboarding.
-      // IMPORTANT: Don't redirect away from auth/home screens.
+      // IMPORTANT: Don't redirect away from auth/home/profile-details screens.
       if (flow == OnboardingFlowState.onboarding) {
-        if (!isOnboarding && !isAuth && !isHome) {
+        if (!isOnboarding && !isAuth && !isHome && !isProfileDetails) {
           return OnboardingScreen1.routePath;
         }
       }
@@ -132,8 +166,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 
 class _GoRouterRefreshStream extends ChangeNotifier {
   _GoRouterRefreshStream(this.ref) {
-    ref.listen(authStateProvider, (_, __) => notifyListeners());
-    ref.listen(onboardingFlowProvider, (_, __) => notifyListeners());
+    ref.listen(authStateProvider,       (_, __) => notifyListeners());
+    ref.listen(onboardingFlowProvider,  (_, __) => notifyListeners());
+    ref.listen(profileProvider,         (_, __) => notifyListeners());
+    ref.listen(profileSkippedProvider,  (_, __) => notifyListeners());
   }
 
   final Ref ref;

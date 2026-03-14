@@ -40,6 +40,7 @@ dependencies:
 
   # Networking
   dio: ^5.8.0
+  http: ^1.2.2
 
   # Functional error handling
   dartz: ^0.10.1
@@ -69,6 +70,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  flutter_launcher_icons: ^0.14.3
+
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
@@ -89,8 +92,18 @@ flutter:
 
   assets:
     - assets/
+    - assets/icons/
+    - assets/offerone.png
+    - assets/offertwo.png
     - assets/images/
+    - assets/images/banners/
+    - assets/images/promo/
+    - assets/icons/quick_actions/
     - assets/icons/google_logo.svg
+
+flutter_launcher_icons:
+  android: true
+  image_path: assets/images/dlab_logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

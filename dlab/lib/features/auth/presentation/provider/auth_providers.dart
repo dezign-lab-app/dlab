@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:logger/logger.dart';
@@ -12,6 +12,7 @@ import '../../../../core/network/dio_client.dart';
 import '../../data/datasource/auth_remote_datasource.dart';
 import '../../data/repository/auth_repository_impl.dart';
 import '../../domain/entities/user.dart';
+import '../../domain/entities/user_profile.dart';
 import '../../domain/repository/auth_repository.dart';
 
 final loggerProvider = Provider<Logger>((ref) => Logger());
@@ -83,27 +84,13 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
     try {
       final supaUser = Supabase.instance.client.auth.currentUser!;
       final provider = supaUser.appMetadata['provider'] as String? ?? 'google';
-      try {
-        final either = await _repo.syncUser(provider: provider);
-        state = either.fold(
-          (_) => AsyncValue.data(Authenticated(User(
-            id: supaUser.id,
-            supabaseUid: supaUser.id,
-            email: supaUser.email ?? '',
-            name: supaUser.userMetadata?['full_name'] as String?,
-            authProvider: provider,
-          ))),
-          (user) => AsyncValue.data(Authenticated(user)),
-        );
-      } catch (_) {
-        state = AsyncValue.data(Authenticated(User(
-          id: supaUser.id,
-          supabaseUid: supaUser.id,
-          email: supaUser.email ?? '',
-          name: supaUser.userMetadata?['full_name'] as String?,
-          authProvider: provider,
-        )));
-      }
+      state = AsyncValue.data(Authenticated(User(
+        id: supaUser.id,
+        supabaseUid: supaUser.id,
+        email: supaUser.email ?? '',
+        name: supaUser.userMetadata?['full_name'] as String?,
+        authProvider: provider,
+      )));
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     } finally {
@@ -125,31 +112,13 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
     // Try to enrich from the backend, but fall back to Supabase user data
     // if the backend is unreachable.
     final supaUser = Supabase.instance.client.auth.currentUser!;
-    try {
-      final either = await _repo.me();
-      state = either.fold(
-        // Backend unreachable / user not synced yet — still authenticated.
-        (_) => AsyncValue.data(Authenticated(User(
-          id: supaUser.id,
-          supabaseUid: supaUser.id,
-          email: supaUser.email ?? '',
-          name: supaUser.userMetadata?['full_name'] as String?,
-          authProvider:
-              supaUser.appMetadata['provider'] as String? ?? 'email',
-        ))),
-        (user) => AsyncValue.data(Authenticated(user)),
-      );
-    } catch (_) {
-      // Even on exception, if we have a session, treat as authenticated.
-      state = AsyncValue.data(Authenticated(User(
-        id: supaUser.id,
-        supabaseUid: supaUser.id,
-        email: supaUser.email ?? '',
-        name: supaUser.userMetadata?['full_name'] as String?,
-        authProvider:
-            supaUser.appMetadata['provider'] as String? ?? 'email',
-      )));
-    }
+    state = AsyncValue.data(Authenticated(User(
+      id: supaUser.id,
+      supabaseUid: supaUser.id,
+      email: supaUser.email ?? '',
+      name: supaUser.userMetadata?['full_name'] as String?,
+      authProvider: supaUser.appMetadata['provider'] as String? ?? 'email',
+    )));
   }
 
   // ── Check email exists (register screen) ────────────────────────────────
@@ -257,31 +226,14 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
         UserAttributes(data: {'full_name': name}),
       );
 
-      // Step 3: sync to PostgreSQL (best-effort — backend may not be running
-      // in dev; auth succeeds regardless).
       final supaUser = Supabase.instance.client.auth.currentUser!;
-      try {
-        final either = await _repo.syncUser(fullName: name, provider: 'email');
-        state = either.fold(
-          (_) => AsyncValue.data(Authenticated(User(
-            id: supaUser.id,
-            supabaseUid: supaUser.id,
-            email: supaUser.email ?? email,
-            name: name,
-            authProvider: 'email',
-          ))),
-          (user) => AsyncValue.data(Authenticated(user)),
-        );
-      } catch (_) {
-        // Backend unreachable — still mark as authenticated with Supabase data.
-        state = AsyncValue.data(Authenticated(User(
-          id: supaUser.id,
-          supabaseUid: supaUser.id,
-          email: supaUser.email ?? email,
-          name: name,
-          authProvider: 'email',
-        )));
-      }
+      state = AsyncValue.data(Authenticated(User(
+        id: supaUser.id,
+        supabaseUid: supaUser.id,
+        email: supaUser.email ?? email,
+        name: name,
+        authProvider: 'email',
+      )));
     } on AuthException catch (e) {
       state = AsyncValue.error(Exception(_mapSupabaseError(e)), StackTrace.current);
     } catch (e, st) {
@@ -305,25 +257,12 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
         password: password,
       );
       final supaUser = Supabase.instance.client.auth.currentUser!;
-      try {
-        final either = await _repo.me();
-        state = either.fold(
-          (_) => AsyncValue.data(Authenticated(User(
-            id: supaUser.id,
-            supabaseUid: supaUser.id,
-            email: supaUser.email ?? email,
-            authProvider: 'email',
-          ))),
-          (user) => AsyncValue.data(Authenticated(user)),
-        );
-      } catch (_) {
-        state = AsyncValue.data(Authenticated(User(
-          id: supaUser.id,
-          supabaseUid: supaUser.id,
-          email: supaUser.email ?? email,
-          authProvider: 'email',
-        )));
-      }
+      state = AsyncValue.data(Authenticated(User(
+        id: supaUser.id,
+        supabaseUid: supaUser.id,
+        email: supaUser.email ?? email,
+        authProvider: 'email',
+      )));
     } on AuthException catch (e) {
       state = AsyncValue.error(Exception(_mapSupabaseError(e)), StackTrace.current);
     } catch (e, st) {
@@ -386,27 +325,13 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthStatus>> {
       );
 
       final supaUser = Supabase.instance.client.auth.currentUser!;
-      try {
-        final either = await _repo.syncUser(provider: 'google');
-        state = either.fold(
-          (_) => AsyncValue.data(Authenticated(User(
-            id: supaUser.id,
-            supabaseUid: supaUser.id,
-            email: supaUser.email ?? '',
-            name: supaUser.userMetadata?['full_name'] as String?,
-            authProvider: 'google',
-          ))),
-          (user) => AsyncValue.data(Authenticated(user)),
-        );
-      } catch (_) {
-        state = AsyncValue.data(Authenticated(User(
-          id: supaUser.id,
-          supabaseUid: supaUser.id,
-          email: supaUser.email ?? '',
-          name: supaUser.userMetadata?['full_name'] as String?,
-          authProvider: 'google',
-        )));
-      }
+      state = AsyncValue.data(Authenticated(User(
+        id: supaUser.id,
+        supabaseUid: supaUser.id,
+        email: supaUser.email ?? '',
+        name: supaUser.userMetadata?['full_name'] as String?,
+        authProvider: 'google',
+      )));
     } on AuthException catch (e) {
       state = AsyncValue.error(
           Exception(_mapSupabaseError(e)), StackTrace.current);
@@ -546,3 +471,72 @@ final authStateProvider =
     StateNotifierProvider<AuthStateNotifier, AsyncValue<AuthStatus>>((ref) {
   return AuthStateNotifier(ref.watch(authRepositoryProvider));
 });
+
+// ── Profile completeness ─────────────────────────────────────────────────────
+
+/// In-memory flag — set to true when the user explicitly taps "Skip for now".
+/// Resets on app restart; on the next cold start they'll be prompted again
+/// if their profile is still incomplete.
+final profileSkippedProvider = StateProvider<bool>((ref) => false);
+
+/// Fetches the public.profiles row for the currently authenticated user.
+/// Automatically re-runs whenever auth state changes.
+final profileProvider = FutureProvider<UserProfile?>((ref) async {
+  final authStatus = ref.watch(authStateProvider).valueOrNull;
+  if (authStatus is! Authenticated) return null;
+
+  final uid = Supabase.instance.client.auth.currentUser?.id;
+  if (uid == null) return null;
+
+  try {
+    final data = await Supabase.instance.client
+        .from('profiles')
+        .select()
+        .eq('id', uid)
+        .maybeSingle();          // returns null instead of 406 when no row exists
+    if (data == null) return null;
+    return UserProfile.fromJson(data as Map<String, dynamic>);
+  } catch (_) {
+    // Table missing or RLS error — treat as incomplete, don't crash.
+    return null;
+  }
+});
+
+/// Saves profile details to Supabase then invalidates [profileProvider] so
+/// the router re-evaluates and sends the user to the home screen.
+class SaveProfileService {
+  const SaveProfileService(this._ref);
+  final Ref _ref;
+
+  Future<void> save({
+    required String displayName,
+    required String phone,
+    required String birthday,   // 'YYYY-MM-DD'
+    required String gender,
+    required bool receivesOffers,
+  }) async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) throw Exception('Not authenticated');
+
+    debugPrint('[SaveProfile] upserting profile for uid=$uid');
+
+    await Supabase.instance.client.from('profiles').upsert({
+      'id': uid,
+      'display_name': displayName,
+      'phone': phone,
+      'birthday': birthday,
+      'gender': gender,
+      'receives_offers': receivesOffers,
+      'updated_at': DateTime.now().toIso8601String(),
+    });
+
+    debugPrint('[SaveProfile] upsert complete — invalidating profileProvider');
+
+    // Refetch profile so router redirect logic re-runs.
+    _ref.invalidate(profileProvider);
+  }
+}
+
+final saveProfileProvider = Provider<SaveProfileService>(
+  (ref) => SaveProfileService(ref),
+);

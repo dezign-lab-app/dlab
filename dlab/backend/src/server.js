@@ -2,8 +2,10 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 
-import { authRouter } from './routes/auth.js';
-import { errorHandler } from './middleware/errorHandler.js';
+import { authRouter }      from './routes/auth.js';
+import { webhookRouter }   from './routes/webhook.js';
+import { imageProxyRouter } from './routes/imageProxy.js';
+import { errorHandler }    from './middleware/errorHandler.js';
 
 const app = express();
 
@@ -33,7 +35,11 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({
+  limit: '1mb',
+  // Preserve raw buffer on req.rawBody for webhook HMAC verification.
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
@@ -48,7 +54,9 @@ app.get('/health/db', async (req, res) => {
   }
 });
 
-app.use('/api/auth', authRouter);
+app.use('/api/auth',         authRouter);
+app.use('/api/webhooks',     webhookRouter);
+app.use('/api/image-proxy',  imageProxyRouter);
 
 // Global error handler — must be last middleware
 app.use(errorHandler);
